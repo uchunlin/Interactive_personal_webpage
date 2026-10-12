@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 對戰記憶翻牌</title>
+    <style>
+        * 
+		{ 
+		  box-sizing: border-box; 
+		}
+        
+        body 
+		{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            height: 100vh; /* 鎖定全螢幕高度 */
+            overflow: hidden; /* 禁止出現捲軸 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+        }
+
+        /* --- 2. 頂部資訊區 (計分板) --- */
+        .header-area 
+		{
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        h2 
+		{ 
+		  margin: 5px 0; 
+		  font-size: 1.5rem; 
+		  color: #333; 
+		}
+
+        .scoreboard 
+		{
+            display: flex;
+            gap: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .score-box 
+		{
+            text-align: center;
+            padding: 5px 15px;
+            border-radius: 8px;
+            border: 2px solid transparent;
+            transition: 0.3s;
+            min-width: 80px;
+        }
+
+        .score-box.active 
+		{
+            background-color: #e3f2fd;
+            border-color: steelblue;
+            color: steelblue;
+            transform: scale(1.05);
+            font-weight: bold;
+        }
+
+        .score-num 
+		{ 
+		  font-size: 1.4rem; 
+		  font-weight: bold; 
+		}
+        
+        #game-status 
+		{
+            margin-top: 5px;
+            font-weight: bold;
+            color: #e74c3c;
+            height: 1.5em; /* 預留高度避免跳動 */
+        }
+
+        /* --- 3. 遊戲盤面 (RWD 核心) --- */
+        .game-board 
+		{
+            flex: 1; /* 佔據剩餘空間 */
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            width: 100%;
+            max-width: 600px; 
+            max-height: 70vh;
+            perspective: 1000px;
+            margin: 0 auto;
+            align-content: center; /* 垂直居中 */
+        }
+
+        /* --- 4. 卡片樣式 --- */
+        .card 
+		{
+            position: relative;
+            width: 100%;
+            aspect-ratio: 6.299 / 9; 
+            cursor: pointer;
+            transform-style: preserve-3d;
+            transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+        }
+
+        /* 翻牌動畫 */
+        .card.flipped 
+		{ 
+		  transform: rotateY(180deg); 
+		}
+
+        /* AI 回合鎖定盤面 */
+        .game-board.ai-turn 
+		{
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        /* 卡片正反面 */
+        .front-face, .back-face 
+		{
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            border-radius: 6px;
+            backface-visibility: hidden;
+            background-size: cover; /* 圖片填滿 */
+            background-position: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .back-face 
+		{
+            background-color: #2c3e50;
+            border: 2px solid #fff;
+        }
+
+        .front-face 
+		{
+            transform: rotateY(180deg);
+            background-color: #fff;
+        }
+
+        /* --- 5. 底部按鈕 --- */
+        .footer-area 
+		{
+            flex: 0 0 auto;
+            padding: 10px;
+        }
+        
+        .btn-restart 
+		{
+            padding: 8px 25px;
+            background: steelblue;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .btn-restart:hover 
+		{ 
+		  background: #2c3e50; 
+		}
+
+        /* --- 6. 結果彈窗 (GIF) --- */
+        .overlay 
+		{
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            color: white;
+            animation: fadeIn 0.5s;
+        }
+        
+        .overlay img 
+		{
+            max-width: 80%;
+            max-height: 40vh;
+            border-radius: 10px;
+            border: 4px solid white;
+            margin: 20px 0;
+        }
+
+        .overlay h2 
+		{ 
+		  color: #f1c40f; 
+		  font-size: 2rem; 
+		}
+
+        @keyframes fadeIn 
+		{ 
+		  from { opacity: 0; } 
+		  to { opacity: 1; } 
+		}
+
+    </style>
+</head>
+<body>
+
+    <!-- 頂部資訊 -->
+    <div class="header-area">
+        <div class="scoreboard">
+            <div class="score-box active" id="player-box">
+                <div>玩家</div>
+                <div class="score-num" id="player-score">0</div>
+            </div>
+            <div class="score-box" id="ai-box">
+                <div>AI 電腦</div>
+                <div class="score-num" id="ai-score">0</div>
+            </div>
+        </div>
+        <div id="game-status">準備開始...</div>
+    </div>
+
+    <!-- 遊戲區域 -->
+    <div class="game-board" id="gameBoard">
+        <!-- JS 動態生成卡片 -->
+    </div>
+
+    <!-- 底部按鈕 -->
+    <div class="footer-area">
+        <button class="btn-restart" onclick="initGame()">重新開始</button>
+    </div>
+
+    <!-- 結算彈窗 -->
+    <div id="resultOverlay" class="overlay">
+        <h2 id="resultTitle">遊戲結束</h2>
+        <div id="resultDesc" style="font-size: 1.2rem; margin-bottom: 20px;"></div>
+        <button class="btn-restart" onclick="closeOverlay()">再玩一次</button>
+    </div>
+
+    <script>
+        // ================= CONFIG 設定區 =================
+        const CARD_IMAGES = [
+            'pic1.jpg',
+            'pic2.jpg',
+            'pic3.jpg',
+            'pic4.jpg',
+            'pic5.jpg',
+            'pic6.jpg'
+        ];
+
+        const BACK_IMAGE = 'pic.jpg';
+
+        // ================================================
+
+        // 遊戲變數
+        let cards = []; // 實際遊戲資料
+        let cardElements = []; // DOM 元素參照
+        
+        let firstCard = null;
+        let secondCard = null;
+        let lockBoard = false;
+        let isPlayerTurn = true;
+        let scores = { player: 0, ai: 0 };
+        let remainingPairs = 6;
+        let aiMemory = {}; // AI 記憶: { index: "圖片ID" }
+
+        // DOM 元素
+        const gameBoard = document.getElementById('gameBoard');
+        const statusText = document.getElementById('game-status');
+        const playerBox = document.getElementById('player-box');
+        const aiBox = document.getElementById('ai-box');
+        const playerScoreEl = document.getElementById('player-score');
+        const aiScoreEl = document.getElementById('ai-score');
+        const overlay = document.getElementById('resultOverlay');
+
+        function initGame() {
+            overlay.style.display = 'none';
+            gameBoard.innerHTML = '';
+            
+            // 重置數據
+            scores = { player: 0, ai: 0 };
+            remainingPairs = 6;
+            aiMemory = {};
+            cardElements = [];
+            [firstCard, secondCard, lockBoard] = [null, null, false];
+            updateScoreUI();
+
+            // 準備卡片 (id 0~5 代表 6 種圖片)
+            let deck = [];
+            for (let i = 0; i < 6; i++) {
+                deck.push({ id: i, img: CARD_IMAGES[i] });
+                deck.push({ id: i, img: CARD_IMAGES[i] });
+            }
+            // 洗牌
+            deck.sort(() => Math.random() - 0.5);
+
+            // 生成 HTML
+            deck.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.classList.add('card');
+                card.dataset.id = item.id;   // 用於比對配對
+                card.dataset.index = index;  // 用於 AI 記憶位置
+                
+                // 設定圖片背景
+                card.innerHTML = `
+                    <div class="front-face" style="background-image: url('${item.img}')"></div>
+                    <div class="back-face" style="background-image: url('${BACK_IMAGE}')"></div>
+                `;
+
+                card.addEventListener('click', () => handleCardClick(card));
+                gameBoard.appendChild(card);
+                cardElements.push(card);
+            });
+
+            // 玩家先手
+            isPlayerTurn = true;
+            updateTurnUI();
+        }
+
+        function handleCardClick(card) {
+            if (lockBoard) return;
+            if (!isPlayerTurn) return; // AI 回合不能點
+            if (card === firstCard) return;
+            if (card.classList.contains('matched')) return;
+
+            flipCardLogic(card);
+        }
+
+        // 核心翻牌 (玩家/AI 共用)
+        function flipCardLogic(card) {
+            card.classList.add('flipped');
+
+            // AI 記住這張牌
+            const idx = card.dataset.index;
+            const id = card.dataset.id;
+            aiMemory[idx] = id;
+
+            if (!firstCard) {
+                firstCard = card;
+                return;
+            }
+
+            secondCard = card;
+            checkForMatch();
+        }
+
+        function checkForMatch() {
+            let isMatch = firstCard.dataset.id === secondCard.dataset.id;
+
+            if (isMatch) {
+                processMatch();
+            } else {
+                unflipCards();
+            }
+        }
+
+        function processMatch() {
+            // 標記為完成 (凍結)
+            firstCard.classList.add('matched');
+            secondCard.classList.add('matched');
+
+            // 加分
+            if (isPlayerTurn) scores.player++;
+            else scores.ai++;
+
+            updateScoreUI();
+            
+            // 重置回合暫存
+            resetBoardVars();
+            remainingPairs--;
+
+            // 檢查是否結束
+            if (remainingPairs === 0) {
+                setTimeout(showEndGame, 500);
+                return;
+            }
+
+            // 配對成功者繼續回合 (這是獎勵規則)
+            // 如果是 AI 成功，稍後繼續執行 AI
+            if (!isPlayerTurn) {
+                statusText.innerText = "AI 配對成功！(AI 連擊)";
+                setTimeout(aiTurn, 1000);
+            } else {
+                statusText.innerText = "配對成功！(請繼續)";
+            }
+        }
+
+        function unflipCards() {
+            lockBoard = true;
+            setTimeout(() => {
+                firstCard.classList.remove('flipped');
+                secondCard.classList.remove('flipped');
+                resetBoardVars();
+                
+                // 換人
+                isPlayerTurn = !isPlayerTurn;
+                updateTurnUI();
+
+                // 如果換到 AI，觸發 AI 思考
+                if (!isPlayerTurn) {
+                    setTimeout(aiTurn, 1000);
+                }
+            }, 1000);
+        }
+
+        function resetBoardVars() {
+            [firstCard, secondCard] = [null, null];
+            lockBoard = false;
+        }
+
+        function updateScoreUI() {
+            playerScoreEl.innerText = scores.player;
+            aiScoreEl.innerText = scores.ai;
+        }
+
+        function updateTurnUI() {
+            if (isPlayerTurn) {
+                statusText.innerText = "輪到你了！";
+                statusText.style.color = "steelblue";
+                gameBoard.classList.remove('ai-turn');
+                playerBox.classList.add('active');
+                aiBox.classList.remove('active');
+            } else {
+                statusText.innerText = "AI 思考中...";
+                statusText.style.color = "hsl(206, 76%, 67%)";
+                gameBoard.classList.add('ai-turn');
+                aiBox.classList.add('active');
+                playerBox.classList.remove('active');
+            }
+        }
+
+        // --- AI 邏輯 ---
+        function aiTurn() {
+            if (remainingPairs <= 0) return;
+
+            // 1. 找記憶中成對的
+            let pick1 = findPairInMemory();
+            
+            // 2. 如果沒有，隨機翻一張未知的
+            if (!pick1) pick1 = getRandomUnknownCard();
+            
+            // 翻第一張
+            flipCardLogic(pick1);
+
+            setTimeout(() => {
+                // 3. 翻第二張：檢查第一張的配對是否在記憶裡？
+                let pick2 = findMatchFor(pick1);
+                
+                // 4. 如果沒有，隨機翻另一張未知的
+                if (!pick2) pick2 = getRandomUnknownCard(pick1);
+
+                // 翻第二張
+                flipCardLogic(pick2);
+            }, 800);
+        }
+
+        function findPairInMemory() {
+            // 檢查 aiMemory 中是否有兩個 index 對應到同一個 id
+            let seen = {};
+            for (let idx in aiMemory) {
+                if (cardElements[idx].classList.contains('matched')) continue;
+                
+                let id = aiMemory[idx];
+                if (seen[id]) return cardElements[seen[id]]; // 找到之前那個
+                seen[id] = idx;
+            }
+            return null;
+        }
+
+        function findMatchFor(card) {
+            let targetId = card.dataset.id;
+            let currentIdx = card.dataset.index;
+
+            for (let idx in aiMemory) {
+                if (idx !== currentIdx && aiMemory[idx] === targetId) {
+                    if (!cardElements[idx].classList.contains('matched')) {
+                        return cardElements[idx];
+                    }
+                }
+            }
+            return null;
+        }
+
+        function getRandomUnknownCard(exclude = null) {
+            // 找出所有沒被翻開、沒被配對、不是 exclude 的牌
+            let candidates = cardElements.filter(c => 
+                !c.classList.contains('flipped') && 
+                !c.classList.contains('matched') && 
+                c !== exclude
+            );
+            
+            if (candidates.length === 0) {
+                // 如果只剩下已知但沒翻開的牌 (極少情況)，就選任意可翻的
+                 candidates = cardElements.filter(c => 
+                    !c.classList.contains('flipped') && 
+                    !c.classList.contains('matched') && 
+                    c !== exclude
+                );
+            }
+            
+            return candidates[Math.floor(Math.random() * candidates.length)];
+        }
+
+        // --- 結算畫面 ---
+        function showEndGame() {
+            let title = "";
+            let desc = `玩家 ${scores.player} - ${scores.ai} AI`;
+
+            if (scores.player > scores.ai) {
+                title = "恭喜你贏了！";
+            } else if (scores.player < scores.ai) {
+                title = "AI 獲勝！";
+            } else {
+                title = "平手！";
+            }
+
+            document.getElementById('resultTitle').innerText = title;
+            document.getElementById('resultDesc').innerText = desc;
+            overlay.style.display = 'flex';
+        }
+
+        function closeOverlay() {
+            overlay.style.display = 'none';
+            initGame();
+        }
+
+        // 啟動
+        initGame();
+    </script>
+</body>
+</html>
